@@ -170,10 +170,6 @@ class SyncController extends ChangeNotifier {
       ),
     );
 
-    if (!await _ble.ensurePermissions()) {
-      throw const BleException('블루투스 권한이 필요합니다');
-    }
-
     final sinceSeq = await _db.lastSeq(handshake.deviceId);
     return _ble.download(
       sinceSeq: sinceSeq,

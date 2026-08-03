@@ -40,7 +40,6 @@ dependencies:
   sqflite: ^2.4.3
   path: ^1.9.1
   intl: ^0.20.3
-  permission_handler: ^13.0.0
   ndef_record: ^1.4.2
   http: ^1.6.0
 

@@ -3,7 +3,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../data/packet.dart';
 
@@ -45,21 +44,8 @@ class BleService {
   static bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  /// Android 12+ 는 스캔·연결 권한이 따로 있고, 그 이전은 위치 권한이 필요하다.
-  Future<bool> ensurePermissions() async {
-    if (kIsWeb) return false;
-    if (!_isAndroid) return true;
-
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
-
-    // 구형 안드로이드에서는 bluetoothScan/Connect 가 항상 granted 로 떨어진다.
-    return statuses[Permission.bluetoothScan]?.isGranted == true &&
-        statuses[Permission.bluetoothConnect]?.isGranted == true;
-  }
+  // 런타임 권한(BLUETOOTH_SCAN/CONNECT, 구형은 위치)은 flutter_blue_plus 가
+  // startScan 시점에 직접 요청한다. 따로 permission_handler 를 두지 않는다.
 
   Stream<BluetoothAdapterState> get adapterState =>
       FlutterBluePlus.adapterState;

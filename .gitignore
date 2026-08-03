@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Gradle 산출물 (android/build 는 루트 .gitignore 의 /build/ 에 안 걸린다)
+android/build/
