@@ -1,0 +1,30 @@
+# This file configures the analyzer, which statically analyzes Dart code to
+# check for errors, warnings, and lints.
+#
+# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
+# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
+# invoked from the command line by running `flutter analyze`.
+
+# The following line activates a set of recommended lints for Flutter apps,
+# packages, and plugins designed to encourage good coding practices.
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  # The lint rules applied to this project can be customized in the
+  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
+  # included above or to enable additional rules. A list of all available lints
+  # and their documentation is published at https://dart.dev/lints.
+  #
+  # Instead of disabling a lint rule for the entire project in the
+  # section below, it can also be suppressed for a single line of code
+  # or a specific dart file by using the `// ignore: name_of_lint` and
+  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
+  # producing the lint.
+  rules:
+    # 이름 있는 매개변수에는 private 필드 초기화 형식(this._db)을 쓸 수 없어
+    # 이 규칙이 고칠 수 없는 지적을 낸다. private 의존성을 주입받는 클래스가
+    # 여럿이라 파일마다 ignore 를 붙이는 대신 여기서 끈다.
+    prefer_initializing_formals: false
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options
