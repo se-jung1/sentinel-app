@@ -37,6 +37,11 @@ class NodeFlags {
 class QualityTag {
   static const tsFuture = 'ts_future';
   static const tsStale = 'ts_stale';
+
+  /// 노드에 시계가 없어서(NodeFlags.rtcUnset) 앱이 다운로드 시각 기준으로
+  /// 역산한 타임스탬프다. 레코드 사이 간격은 정확하지만 절대 시각은
+  /// 전원이 꺼져 있던 시간만큼 어긋날 수 있다.
+  static const tsDerived = 'ts_derived';
 }
 
 /// 노드가 한 창(기본 30초) 동안 관측한 것 한 줄.

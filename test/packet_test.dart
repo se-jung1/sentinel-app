@@ -98,6 +98,69 @@ void main() {
     );
   });
 
+  group('시계 없는 노드의 ts 역산', () {
+    /// 노드의 ts 는 '최초 부팅 이후 누적 초' 라서 유닉스 epoch 로 읽으면
+    /// 1970년이 된다. epoch + N초 로 그 상황을 그대로 만든다.
+    List<Reading> boot(List<int> deviceSeconds, {required int flags}) => [
+      for (var i = 0; i < deviceSeconds.length; i++)
+        Reading(
+          deviceId: 'PRA3F92C',
+          seq: i,
+          ts: DateTime.fromMillisecondsSinceEpoch(
+            deviceSeconds[i] * 1000,
+            isUtc: true,
+          ),
+          pm25: 20,
+          pm10: 40,
+          flags: flags,
+        ),
+    ];
+
+    test('RTC_UNSET 이면 다운로드 시각 기준으로 밀어준다', () {
+      final downloadedAt = DateTime.utc(2026, 8, 13, 6, 3, 10);
+      final bytes = SentinelPacket.encode(
+        'PRA3F92C',
+        boot([29210, 29240, 29270], flags: NodeFlags.rtcUnset),
+      );
+
+      final r = SentinelPacket.parse(bytes, now: downloadedAt).readings;
+
+      // 가장 최신 레코드가 다운로드 시각, 나머지는 그만큼 뒤로.
+      expect(r[2].ts, downloadedAt);
+      expect(r[1].ts, downloadedAt.subtract(const Duration(seconds: 30)));
+      expect(r[0].ts, downloadedAt.subtract(const Duration(seconds: 60)));
+      // 파생값이라는 사실이 남아야 한다 — 절대 시각은 전원이 꺼져 있던
+      // 시간만큼 어긋날 수 있다.
+      expect(r[0].quality, contains(QualityTag.tsDerived));
+      expect(r[0].quality, isNot(contains(QualityTag.tsStale)));
+    });
+
+    test('시계가 있는 노드의 ts 는 손대지 않는다', () {
+      final at = DateTime.utc(2026, 8, 13, 6, 0);
+      final bytes = SentinelPacket.encode('PRA3F92C', [
+        Reading(deviceId: 'PRA3F92C', seq: 0, ts: at, pm25: 20, pm10: 40),
+      ]);
+
+      final r = SentinelPacket.parse(bytes, now: at).readings.single;
+      expect(r.ts, at);
+      expect(r.quality, isNot(contains(QualityTag.tsDerived)));
+    });
+
+    test('파생 시각은 초 단위로 끊는다', () {
+      // 마이크로초를 그대로 실으면 거짓 정밀도이고, 서버를 한 번 돌아오면
+      // 잘려서 안 맞는다.
+      final messy = DateTime.utc(2026, 8, 13, 6, 3, 10, 683, 751);
+      final bytes = SentinelPacket.encode(
+        'PRA3F92C',
+        boot([29210], flags: NodeFlags.rtcUnset),
+      );
+
+      final r = SentinelPacket.parse(bytes, now: messy).readings.single;
+      expect(r.ts.millisecond, 0);
+      expect(r.ts.microsecond, 0);
+    });
+  });
+
   test('헤더만 보고 전체 길이를 계산한다', () {
     final bytes = SentinelPacket.encode('SL-A3F9', sample());
     expect(

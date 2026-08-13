@@ -114,16 +114,45 @@ class SentinelPacket {
     final count = view.getUint16(6, Endian.little);
     final readings = <Reading>[];
 
+    int rawTs(int i) =>
+        view.getUint32(headerSize + i * recordSize + 4, Endian.little);
+    int rawFlags(int i) => view.getUint8(headerSize + i * recordSize + 12);
+
+    // 노드에 달력 시계가 없다. nRF5340 의 RTC 는 32.768 kHz 카운터일 뿐이고
+    // DK 에는 배터리 백업이 없어서, ts 는 유닉스 시각이 아니라 최초 부팅 이후
+    // 누적 초다. 그대로 올리면 전부 1970년으로 들어가 '오늘' 집계가 텅 빈다.
+    //
+    // 시각을 아는 쪽이 여기밖에 없어서 여기서 역산한다. 가장 최신 레코드가
+    // 방금(길어야 한 창) 찍힌 것이므로 그것을 다운로드 시각에 맞추고 나머지를
+    // 같은 간격만큼 뒤로 민다:
+    //
+    //     실제시각(레코드) = 다운로드시각 − (최신 ts − 레코드 ts)
+    //
+    // 정확한 것은 레코드 사이의 간격이지 절대 시각이 아니다. 전원이 완전히
+    // 나갔던 구간은 그 공백을 알 방법이 없어서 그만큼 어긋난다 — 그래서
+    // 버리지 않고 tsDerived 태그를 붙여 파생값임을 남긴다.
+    final rebase = count > 0 && rawFlags(count - 1) & NodeFlags.rtcUnset != 0;
+    final newest = rebase
+        ? List.generate(count, rawTs).reduce((a, b) => a > b ? a : b)
+        : 0;
+    // 노드의 ts 는 초 단위다. 파생 시각이 마이크로초 정밀도를 주장하면
+    // 거짓 정밀도이기도 하고, 서버를 한 번 돌아오면 잘려서 안 맞는다.
+    final anchor = DateTime.fromMillisecondsSinceEpoch(
+      (reference.millisecondsSinceEpoch ~/ 1000) * 1000,
+      isUtc: true,
+    );
+
     for (var i = 0; i < count; i++) {
       final o = headerSize + i * recordSize;
-      final ts = DateTime.fromMillisecondsSinceEpoch(
-        view.getUint32(o + 4, Endian.little) * 1000,
-        isUtc: true,
-      );
+      final raw = rawTs(i);
+      final ts = rebase
+          ? anchor.subtract(Duration(seconds: newest - raw))
+          : DateTime.fromMillisecondsSinceEpoch(raw * 1000, isUtc: true);
       final flags = view.getUint8(o + 12);
 
       // 이상값 비파기 원칙: 버리지 않고 태그만 붙인다.
       final quality = <String>[
+        if (rebase) QualityTag.tsDerived,
         if (ts.isAfter(reference.add(const Duration(minutes: 5))))
           QualityTag.tsFuture,
         if (ts.isBefore(reference.subtract(const Duration(days: 365))))

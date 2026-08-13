@@ -169,6 +169,7 @@ class RemoteSummary {
     required this.latest,
     required this.todayMaxPm10,
     required this.exceedMinutes,
+    this.occupiedMinutes = 0,
     required this.alertLevel,
     required this.hourly,
   });
@@ -177,6 +178,10 @@ class RemoteSummary {
   final Reading? latest;
   final int todayMaxPm10;
   final int exceedMinutes;
+
+  /// 오늘 이 기기가 재실로 기록한 시간. occ_s 의 합이라 트래커 유무와
+  /// 무관하게 신뢰할 수 있다 (headcount 는 0/1 바닥값일 수 있다).
+  final int occupiedMinutes;
   final AirAlertLevel alertLevel;
   final List<RemotePoint> hourly;
 
@@ -209,6 +214,7 @@ class RemoteSummary {
             ),
       todayMaxPm10: (json['today_max_pm10'] as int?) ?? 0,
       exceedMinutes: (json['exceed_minutes'] as int?) ?? 0,
+      occupiedMinutes: (json['occupied_minutes'] as int?) ?? 0,
       alertLevel: switch (json['alert_level'] as String?) {
         'alert' => AirAlertLevel.alert,
         'watch' => AirAlertLevel.watch,
