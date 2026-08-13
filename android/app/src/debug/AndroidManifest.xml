@@ -4,4 +4,12 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 개발 서버는 LAN 위의 평문 HTTP(uvicorn)다. Android 9 부터 cleartext 는
+         기본 차단이고, 막히면 예외가 아니라 그냥 연결 실패로 보여서 서버가 안
+         떠 있는 것과 구분이 안 된다.
+
+         debug 소스셋에만 둔다 — release 매니페스트에는 안 붙으므로 운영
+         빌드는 HTTPS 만 쓴다. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>
