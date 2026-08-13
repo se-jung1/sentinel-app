@@ -92,7 +92,7 @@ void main() {
       expect(data.buckets[6].maxPm10, 214); // 13시
       expect(data.buckets[6].maxPm25, 70);
       // 발령 판정용 평균은 최대값보다 낮다 (같은 시간대의 평균/피크 구분).
-      expect(data.buckets[6].avgPm10.round(), lessThan(214));
+      expect(data.buckets[6].avgPm10!.round(), lessThan(214));
 
       // 기준 초과 누적 시간 → 화면에는 2.5 시간으로 표시된다.
       final hours = data.exceedDuration.inMinutes / 60;
@@ -137,6 +137,47 @@ void main() {
       expect(data.buckets.length, 2);
       expect(data.alertLevel, AirAlertLevel.none);
       expect(data.exceedDuration, const Duration(hours: 1));
+    });
+
+    test('센서가 죽었던 시간은 지속을 끊는다', () async {
+      // 09시와 11시가 200, 10시는 미세먼지 센서 고장.
+      // 0 으로 채우면 지속이 끊긴 것처럼, 빼버리면 09시와 11시가 붙어
+      // 2시간 지속처럼 보인다. 둘 다 틀렸다 — '모름' 은 지속을 끊는다.
+      final today = DateTime(2026, 8, 3);
+      await db.upsertDevice(const DeviceInfo(deviceId: 'SL-A3F92C'));
+      await db.insertReadings([
+        for (var i = 0; i < 60; i++)
+          reading(i, today.add(Duration(hours: 9, minutes: i)), 30, 200),
+        for (var i = 0; i < 60; i++)
+          Reading(
+            deviceId: 'SL-A3F92C',
+            seq: 100 + i,
+            ts: today.add(Duration(hours: 10, minutes: i)).toUtc(),
+            headcount: 1,
+            occS: 30,
+            flags: NodeFlags.aqFault,
+          ),
+        for (var i = 0; i < 60; i++)
+          reading(200 + i, today.add(Duration(hours: 11, minutes: i)), 30, 200),
+      ]);
+
+      final data = await ReadingRepository(db).loadDashboard(
+        'SL-A3F92C',
+        day: today,
+      );
+      expect(data.buckets.length, 3);
+      expect(data.buckets[1].maxPm10, isNull,
+          reason: '측정이 없으면 0 이 아니라 null');
+      expect(data.alertLevel, AirAlertLevel.none,
+          reason: '1시간짜리 두 토막은 지속이 아니다');
+      // 레이더는 멀쩡했으니 그 시간 기록 자체는 남아 있어야 한다.
+      final row = await db.raw.query(
+        'readings',
+        where: 'seq = ?',
+        whereArgs: [100],
+      );
+      expect(row.first['headcount'], 1);
+      expect(row.first['pm10'], isNull);
     });
   });
 }

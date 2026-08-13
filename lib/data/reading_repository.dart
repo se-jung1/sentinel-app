@@ -36,10 +36,13 @@ class HourBucket {
 
   /// 버킷 시작 시각 (로컬).
   final DateTime hour;
-  final double avgPm25;
-  final int maxPm25;
-  final double avgPm10;
-  final int maxPm10;
+
+  /// 그 시간에 미세먼지 측정이 하나도 없었으면 null 이다. 레코드 자체는
+  /// 있었을 수 있다 — 센서가 죽은 채로 재실만 기록된 구간이 그렇게 생겼다.
+  final double? avgPm25;
+  final int? maxPm25;
+  final double? avgPm10;
+  final int? maxPm10;
 }
 
 class AlertEvent {
@@ -158,7 +161,8 @@ class ReadingRepository {
         events.add(
           AlertEvent(
             peakAt: peak!.hour,
-            peakPm10: peak!.maxPm10,
+            // peak 은 maxPm10 이 null 이 아닐 때만 잡힌다 (위 루프).
+            peakPm10: peak!.maxPm10!,
             duration: Duration(hours: hours),
           ),
         );
@@ -168,9 +172,12 @@ class ReadingRepository {
     }
 
     for (final b in buckets) {
-      if (b.maxPm10 >= AirKorea.pm10Watch) {
+      final pm10 = b.maxPm10;
+      // 측정이 없던 시간은 '기준 아래' 가 아니라 '모름' 이다. 건너뛰면 앞뒤가
+      // 붙어 없던 지속이 생기고, 0 으로 채우면 실제 지속이 끊긴다. 끊는다.
+      if (pm10 != null && pm10 >= AirKorea.pm10Watch) {
         hours++;
-        if (peak == null || b.maxPm10 > peak!.maxPm10) peak = b;
+        if (peak == null || pm10 > peak!.maxPm10!) peak = b;
       } else {
         flush();
       }
@@ -232,10 +239,11 @@ class ReadingRepository {
         hour: DateTime.fromMillisecondsSinceEpoch(
           (bucket * 3600 - offset) * 1000,
         ),
-        avgPm25: (r['avg_pm25']! as num).toDouble(),
-        maxPm25: (r['max_pm25']! as num).toInt(),
-        avgPm10: (r['avg_pm10']! as num).toDouble(),
-        maxPm10: (r['max_pm10']! as num).toInt(),
+        // AVG/MAX 는 그 버킷이 전부 NULL 이면 NULL 을 준다.
+        avgPm25: (r['avg_pm25'] as num?)?.toDouble(),
+        maxPm25: (r['max_pm25'] as num?)?.toInt(),
+        avgPm10: (r['avg_pm10'] as num?)?.toDouble(),
+        maxPm10: (r['max_pm10'] as num?)?.toInt(),
       );
     }).toList();
 
@@ -266,12 +274,16 @@ class ReadingRepository {
     }
 
     for (var i = 0; i < buckets.length; i++) {
-      if (i > 0 &&
-          buckets[i].hour.difference(buckets[i - 1].hour) !=
-              const Duration(hours: 1)) {
+      final avg = buckets[i].avgPm10;
+      // 측정이 없던 시간은 '모름' 이다. 0 으로 채우면 실제 지속이 끊기고,
+      // 건너뛰면 앞뒤가 붙어 없던 지속이 생긴다. 시간이 끊긴 것과 같이 본다.
+      if (avg == null ||
+          (i > 0 &&
+              buckets[i].hour.difference(buckets[i - 1].hour) !=
+                  const Duration(hours: 1))) {
         flush();
       }
-      run.add(buckets[i].avgPm10);
+      if (avg != null) run.add(avg);
     }
     flush();
     return worst;

@@ -90,21 +90,24 @@ class ApiClient {
           headers: await _headers(),
           body: jsonEncode({
             'device_id': deviceId,
-            // ⚠ 서버(sentinel-api)가 아직 v1 스키마다. app/models.py 의
-            // `pm25: int = Field(ge=0, le=10_000)` 는 null 을 안 받으므로
-            // 센서가 못 읽은 레코드가 섞이면 배치 전체가 422 로 튕긴다.
-            // 재실 필드(headcount/occ_s/dwell_s)와 온습도는 아예 받을 자리가 없다.
-            // 서버를 v3 로 올리기 전까지 업로드는 반쪽이다 — BLE 수집과 로컬
-            // SQLite 저장은 정상이다.
+            // 측정 안 된 값은 키를 빼고 보낸다 — 서버가 optional 로 받으므로
+            // null 을 명시해도 같지만, 재실 전용 노드의 배치가 공기질 키로
+            // 가득 차는 게 없다.
             'readings': [
               for (final r in readings)
                 {
                   'seq': r.seq,
                   'ts': r.ts.toUtc().toIso8601String(),
-                  'pm25': r.pm25,
-                  'pm10': r.pm10,
                   'flags': r.flags,
                   if (r.battery != null) 'battery': r.battery,
+                  if (r.pm25 != null) 'pm25': r.pm25,
+                  if (r.pm10 != null) 'pm10': r.pm10,
+                  if (r.tempC != null) 'temp_c': r.tempC,
+                  if (r.rh != null) 'rh': r.rh,
+                  if (r.voc != null) 'voc': r.voc,
+                  if (r.headcount != null) 'headcount': r.headcount,
+                  if (r.occS != null) 'occ_s': r.occS,
+                  if (r.dwellS != null) 'dwell_s': r.dwellS,
                 },
             ],
           }),
@@ -198,8 +201,11 @@ class RemoteSummary {
               // 서버 요약에는 seq 가 없다. 화면 표시에만 쓰므로 -1 로 둔다.
               seq: -1,
               ts: DateTime.parse(latest['ts'] as String).toUtc(),
-              pm25: latest['pm25'] as int,
-              pm10: latest['pm10'] as int,
+              pm25: latest['pm25'] as int?,
+              pm10: latest['pm10'] as int?,
+              headcount: latest['headcount'] as int?,
+              tempC: (latest['temp_c'] as num?)?.toDouble(),
+              rh: (latest['rh'] as num?)?.toDouble(),
             ),
       todayMaxPm10: (json['today_max_pm10'] as int?) ?? 0,
       exceedMinutes: (json['exceed_minutes'] as int?) ?? 0,
@@ -219,23 +225,26 @@ class RemoteSummary {
 class RemotePoint {
   const RemotePoint({
     required this.ts,
-    required this.pm25Avg,
-    required this.pm25Max,
-    required this.pm10Avg,
-    required this.pm10Max,
+    this.pm25Avg,
+    this.pm25Max,
+    this.pm10Avg,
+    this.pm10Max,
   });
 
   final DateTime ts;
-  final double pm25Avg;
-  final int pm25Max;
-  final double pm10Avg;
-  final int pm10Max;
+
+  /// 그 구간에 미세먼지 측정이 없었으면 null. 서버가 0 으로 접지 않고
+  /// 그대로 내려보낸다.
+  final double? pm25Avg;
+  final int? pm25Max;
+  final double? pm10Avg;
+  final int? pm10Max;
 
   static RemotePoint fromJson(Map<String, dynamic> json) => RemotePoint(
     ts: DateTime.parse(json['ts'] as String).toUtc(),
-    pm25Avg: (json['pm25_avg'] as num).toDouble(),
-    pm25Max: (json['pm25_max'] as num).toInt(),
-    pm10Avg: (json['pm10_avg'] as num).toDouble(),
-    pm10Max: (json['pm10_max'] as num).toInt(),
+    pm25Avg: (json['pm25_avg'] as num?)?.toDouble(),
+    pm25Max: (json['pm25_max'] as num?)?.toInt(),
+    pm10Avg: (json['pm10_avg'] as num?)?.toDouble(),
+    pm10Max: (json['pm10_max'] as num?)?.toInt(),
   );
 }

@@ -31,7 +31,9 @@ class TrendChart extends StatelessWidget {
     }
 
     final peak = buckets
-        .map((b) => (b.maxPm10 > b.maxPm25 ? b.maxPm10 : b.maxPm25).toDouble())
+        .expand((b) => [b.maxPm10, b.maxPm25])
+        .nonNulls
+        .map((v) => v.toDouble())
         .fold<double>(AirKorea.pm10Watch.toDouble(), (a, b) => a > b ? a : b);
     // 주의보 기준선이 항상 보이도록 최소 높이를 확보하고 20 단위로 올림한다.
     final maxY = ((peak * 1.12) / 20).ceil() * 20.0;
@@ -134,8 +136,11 @@ class TrendChart extends StatelessWidget {
               lineBarsData: [
                 LineChartBarData(
                   spots: [
+                    // 측정이 없던 시간은 점을 안 찍는다 — 0 으로 찍으면
+                    // 바닥까지 내려가는 가짜 골짜기가 생긴다.
                     for (final b in buckets)
-                      FlSpot(b.hour.hour.toDouble(), b.maxPm25.toDouble()),
+                      if (b.maxPm25 != null)
+                        FlSpot(b.hour.hour.toDouble(), b.maxPm25!.toDouble()),
                   ],
                   color: SentinelColors.pm25,
                   barWidth: 2,
@@ -154,7 +159,8 @@ class TrendChart extends StatelessWidget {
                 LineChartBarData(
                   spots: [
                     for (final b in buckets)
-                      FlSpot(b.hour.hour.toDouble(), b.maxPm10.toDouble()),
+                      if (b.maxPm10 != null)
+                        FlSpot(b.hour.hour.toDouble(), b.maxPm10!.toDouble()),
                   ],
                   color: SentinelColors.pm10,
                   barWidth: 2,
@@ -185,7 +191,8 @@ class TrendChart extends StatelessWidget {
       final avg = isPm25 ? bucket.avgPm25 : bucket.avgPm10;
       final max = isPm25 ? bucket.maxPm25 : bucket.maxPm10;
       return LineTooltipItem(
-        '${isPm25 ? 'PM2.5' : 'PM10'}  평균 ${avg.round()} · 최고 $max',
+        '${isPm25 ? 'PM2.5' : 'PM10'}  '
+            '평균 ${avg?.round() ?? '—'} · 최고 ${max ?? '—'}',
         TextStyle(
           color: isPm25 ? const Color(0xFF9DBBF0) : const Color(0xFFEBA97C),
           fontSize: 11,
