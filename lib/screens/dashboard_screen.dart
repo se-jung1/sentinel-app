@@ -234,15 +234,18 @@ class _MetricGrid extends StatelessWidget {
     final cards = <Widget>[
       MetricCard(
         label: 'PM2.5',
-        value: '${latest.pm25}',
+        // 측정 안 된 값은 숫자를 만들어내지 않고 '—' 로 둔다.
+        value: latest.pm25?.toString() ?? '—',
         unit: 'µg/m³',
-        emphasize: AirKorea.gradePm25(latest.pm25).index >= AirGrade.bad.index,
+        emphasize: latest.pm25 != null &&
+            AirKorea.gradePm25(latest.pm25!).index >= AirGrade.bad.index,
       ),
       MetricCard(
         label: 'PM10',
-        value: '${latest.pm10}',
+        value: latest.pm10?.toString() ?? '—',
         unit: 'µg/m³',
-        emphasize: AirKorea.gradePm10(latest.pm10).index >= AirGrade.bad.index,
+        emphasize: latest.pm10 != null &&
+            AirKorea.gradePm10(latest.pm10!).index >= AirGrade.bad.index,
       ),
       MetricCard(
         label: '오늘 최고 PM10',

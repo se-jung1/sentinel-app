@@ -11,12 +11,22 @@ class NodeFlags {
   /// 노드가 자체 판단한 임계치 초과.
   static const thresholdExceeded = 0x10;
 
+  /// 트래커가 안 돌아서 headcount 가 인원수가 아니라 0/1 바닥값이다.
+  /// **이 값들을 합산해서 사람 수로 쓰면 안 된다.**
+  static const noTracker = 0x20;
+
+  /// SEN5x 무응답, 또는 상태 레지스터가 팬/레이저 고장을 알림.
+  /// 레이더의 sensorFault 와 분리돼 있다 — 한 노드에 센서가 둘이고 따로 죽는다.
+  static const aqFault = 0x40;
+
   static List<String> describe(int flags) => [
     if (flags & sensorFault != 0) 'sensor_fault',
     if (flags & lowBattery != 0) 'low_battery',
     if (flags & rtcUnset != 0) 'rtc_unset',
     if (flags & calibrating != 0) 'calibrating',
     if (flags & thresholdExceeded != 0) 'threshold_exceeded',
+    if (flags & noTracker != 0) 'no_tracker',
+    if (flags & aqFault != 0) 'aq_fault',
   ];
 }
 
@@ -29,13 +39,24 @@ class QualityTag {
   static const tsStale = 'ts_stale';
 }
 
+/// 노드가 한 창(기본 30초) 동안 관측한 것 한 줄.
+///
+/// 공기질 필드가 전부 nullable 인 이유: null 은 "센서가 그 값을 측정하지 않았다" 는
+/// 뜻이고, 0 과 절대 같지 않다. SEN50 에는 온습도 센서가 없고, 팬이 멈춘 SEN5x 의
+/// PM 0 은 화면에서 "아주 깨끗함" 으로 보인다.
 class Reading {
   const Reading({
     required this.deviceId,
     required this.seq,
     required this.ts,
-    required this.pm25,
-    required this.pm10,
+    this.pm25,
+    this.pm10,
+    this.headcount,
+    this.occS,
+    this.dwellS,
+    this.tempC,
+    this.rh,
+    this.voc,
     this.flags = 0,
     this.quality = const [],
     this.battery,
@@ -46,8 +67,25 @@ class Reading {
 
   /// 측정 시각 (UTC).
   final DateTime ts;
-  final int pm25;
-  final int pm10;
+
+  /// µg/m³. null = 측정 안 됨.
+  final int? pm25;
+  final int? pm10;
+
+  /// 그 창에서 동시에 잡힌 최대 인원. NodeFlags.noTracker 가 서 있으면
+  /// 인원수가 아니라 0/1 바닥값이다.
+  final int? headcount;
+
+  /// 창 중 점유였던 초.
+  final int? occS;
+
+  /// 창이 끝나는 시점의 끊기지 않은 재실 시간(초). 창 경계를 넘어 누적된다.
+  final int? dwellS;
+
+  final double? tempC;
+  final double? rh;
+  final double? voc;
+
   final int flags;
   final List<String> quality;
   final int? battery;
@@ -58,6 +96,12 @@ class Reading {
     'ts': ts.millisecondsSinceEpoch ~/ 1000,
     'pm25': pm25,
     'pm10': pm10,
+    'headcount': headcount,
+    'occ_s': occS,
+    'dwell_s': dwellS,
+    'temp_c': tempC,
+    'rh': rh,
+    'voc': voc,
     'flags': flags,
     'quality': quality.join(','),
     'battery': battery,
@@ -70,8 +114,14 @@ class Reading {
       (row['ts']! as int) * 1000,
       isUtc: true,
     ),
-    pm25: row['pm25']! as int,
-    pm10: row['pm10']! as int,
+    pm25: row['pm25'] as int?,
+    pm10: row['pm10'] as int?,
+    headcount: row['headcount'] as int?,
+    occS: row['occ_s'] as int?,
+    dwellS: row['dwell_s'] as int?,
+    tempC: (row['temp_c'] as num?)?.toDouble(),
+    rh: (row['rh'] as num?)?.toDouble(),
+    voc: (row['voc'] as num?)?.toDouble(),
     flags: (row['flags'] as int?) ?? 0,
     quality: ((row['quality'] as String?) ?? '')
         .split(',')

@@ -90,6 +90,12 @@ class ApiClient {
           headers: await _headers(),
           body: jsonEncode({
             'device_id': deviceId,
+            // ⚠ 서버(sentinel-api)가 아직 v1 스키마다. app/models.py 의
+            // `pm25: int = Field(ge=0, le=10_000)` 는 null 을 안 받으므로
+            // 센서가 못 읽은 레코드가 섞이면 배치 전체가 422 로 튕긴다.
+            // 재실 필드(headcount/occ_s/dwell_s)와 온습도는 아예 받을 자리가 없다.
+            // 서버를 v3 로 올리기 전까지 업로드는 반쪽이다 — BLE 수집과 로컬
+            // SQLite 저장은 정상이다.
             'readings': [
               for (final r in readings)
                 {

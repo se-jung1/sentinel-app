@@ -9,6 +9,36 @@ import 'models.dart';
 /// 서버의 `$setOnInsert` + 유니크 인덱스 업서트와 같은 의미 —
 /// 노드가 원본이므로 먼저 도착한 값이 정본이고, 같은 배치를 몇 번
 /// 재전송해도 결과가 같다.
+/// 공기질 컬럼이 전부 nullable 인 이유는 Reading 쪽 주석 참고 —
+/// null 은 "측정 안 됨" 이고 0 이 아니다.
+const _createReadings = '''
+  CREATE TABLE readings(
+    device_id TEXT    NOT NULL,
+    seq       INTEGER NOT NULL,
+    ts        INTEGER NOT NULL,
+    pm25      INTEGER,
+    pm10      INTEGER,
+    headcount INTEGER,
+    occ_s     INTEGER,
+    dwell_s   INTEGER,
+    temp_c    REAL,
+    rh        REAL,
+    voc       REAL,
+    flags     INTEGER NOT NULL DEFAULT 0,
+    quality   TEXT    NOT NULL DEFAULT '',
+    battery   INTEGER,
+    uploaded  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(device_id, seq)
+  )
+''';
+
+Future<void> _createReadingIndexes(DatabaseExecutor db) async {
+  await db.execute('CREATE INDEX idx_readings_ts ON readings(device_id, ts)');
+  await db.execute(
+    'CREATE INDEX idx_readings_pending ON readings(uploaded, device_id)',
+  );
+}
+
 class SentinelDb {
   SentinelDb._(this._db);
 
@@ -32,7 +62,7 @@ class SentinelDb {
     if (_instance != null) return _instance!;
     final db = await openDatabase(
       path ?? p.join(await getDatabasesPath(), fileName),
-      version: 1,
+      version: 2,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, _) async {
         await db.execute('''
@@ -43,26 +73,30 @@ class SentinelDb {
             last_sync_at INTEGER
           )
         ''');
-        await db.execute('''
-          CREATE TABLE readings(
-            device_id TEXT    NOT NULL,
-            seq       INTEGER NOT NULL,
-            ts        INTEGER NOT NULL,
-            pm25      INTEGER NOT NULL,
-            pm10      INTEGER NOT NULL,
-            flags     INTEGER NOT NULL DEFAULT 0,
-            quality   TEXT    NOT NULL DEFAULT '',
-            battery   INTEGER,
-            uploaded  INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY(device_id, seq)
-          )
-        ''');
-        await db.execute(
-          'CREATE INDEX idx_readings_ts ON readings(device_id, ts)',
-        );
-        await db.execute(
-          'CREATE INDEX idx_readings_pending ON readings(uploaded, device_id)',
-        );
+        await db.execute(_createReadings);
+        await _createReadingIndexes(db);
+      },
+      // v1 = 공기질 전용 (pm25/pm10 NOT NULL). v2 에서 재실 컬럼이 붙고
+      // pm25/pm10 이 nullable 이 됐다 — SQLite 는 NOT NULL 을 ALTER 로 못 떼서
+      // 테이블을 다시 만들고 옮긴다. uploaded 플래그까지 그대로 넘겨야
+      // 이미 올린 데이터를 다시 올리지 않는다.
+      onUpgrade: (db, from, to) async {
+        if (from >= 2) return;
+        await db.transaction((txn) async {
+          await txn.execute(_createReadings.replaceFirst(
+            'CREATE TABLE readings',
+            'CREATE TABLE readings_v2',
+          ));
+          await txn.execute('''
+            INSERT INTO readings_v2
+              (device_id, seq, ts, pm25, pm10, flags, quality, battery, uploaded)
+            SELECT device_id, seq, ts, pm25, pm10, flags, quality, battery, uploaded
+            FROM readings
+          ''');
+          await txn.execute('DROP TABLE readings');
+          await txn.execute('ALTER TABLE readings_v2 RENAME TO readings');
+          await _createReadingIndexes(txn);
+        });
       },
     );
     return _instance = SentinelDb._(db);

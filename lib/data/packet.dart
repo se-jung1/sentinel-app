@@ -5,38 +5,52 @@ import 'models.dart';
 
 /// 노드 → 앱 바이너리 전송 프레임.
 ///
-/// ⚠ 펌웨어 확정 스펙을 아직 받지 못해 아래 형식을 가정하고 구현했다.
-/// 실제 스펙이 나오면 **이 파일만** 고치면 되도록 격리해 두었다.
-/// (NFC 페이로드와 BLE 다운로드가 동일한 프레임을 쓴다고 가정)
+/// nRF5340_Presence 펌웨어의 `src/frame.h` 와 짝을 이룬다. 여기 상수를 고칠 일이
+/// 생기면 그쪽도 같이 고쳐야 한다. (NFC 페이로드와 BLE 다운로드가 같은 프레임을 쓴다)
 ///
 /// 헤더 16바이트 + 레코드 N개 + CRC16 2바이트, 모든 정수는 리틀엔디언.
 ///
 /// ```
 /// off size  field
 ///   0    4  magic        'SNTL'
-///   4    1  version      = 1
-///   5    1  recordSize   = 14
+///   4    1  version      = 3
+///   5    1  recordSize   = 24
 ///   6    2  recordCount  uint16
 ///   8    8  deviceId     ASCII, 0x00 패딩
-///  16  14*N records
+///  16  24*N records
 ///  end   2  crc16-ccitt  (0..end 구간)
 /// ```
 ///
-/// 레코드 14바이트:
+/// 레코드 24바이트. 앞 14바이트는 v2(재실 전용 노드)와 같고 뒤 10바이트가 v3에서
+/// 붙은 공기질이다:
 /// ```
-///   0    4  seq    uint32
-///   4    4  ts     uint32  unix seconds (UTC)
-///   8    2  pm25   uint16  µg/m³
-///  10    2  pm10   uint16  µg/m³
-///  12    1  flags  uint8   NodeFlags
-///  13    1  batt   uint8   %
+///   0    4  seq        uint32
+///   4    4  ts         uint32  unix seconds (UTC)
+///   8    1  headcount  uint8   그 창에서 동시에 잡힌 최대 인원
+///   9    1  occS       uint8   창 중 점유였던 초
+///  10    2  dwellS     uint16  끊기지 않은 재실 시간 (창 경계를 넘어 누적)
+///  12    1  flags      uint8   NodeFlags
+///  13    1  batt       uint8   %
+///  14    2  pm25       uint16  0.1 µg/m³, 창 안 최댓값. 0xFFFF = 측정 안 됨
+///  16    2  pm10       uint16  0.1 µg/m³, 창 안 최댓값
+///  18    2  temp        int16  0.01 °C,   0x7FFF = 측정 안 됨
+///  20    2  rh          int16  0.01 %RH
+///  22    2  voc         int16  0.1 VOC 지수 (SEN54/55만)
 /// ```
+///
+/// 측정 안 됨 센티널이 부호 있는 필드만 다른 이유: SEN5x 는 없는 값을 전부 `0xFFFF`
+/// 로 답하는데 int16 에서 그건 `-1` 이고, −0.01 °C 는 실제로 나올 수 있는 값이다.
 class SentinelPacket {
   static const magic = 0x4C544E53; // 'SNTL' little-endian
   static const headerSize = 16;
-  static const recordSize = 14;
+  static const recordSize = 24;
   static const crcSize = 2;
-  static const supportedVersion = 1;
+  static const supportedVersion = 3;
+
+  /// 센서가 "그 값은 없다" 고 답한 것. 0 과 구분해야 한다 — 팬이 멈춘 센서의
+  /// PM 0 은 "공기 깨끗함" 으로 읽히고, 그게 이 제품이 내면 안 되는 유일한 거짓말이다.
+  static const unknownU = 0xFFFF;
+  static const unknownS = 0x7FFF;
 
   const SentinelPacket({required this.deviceId, required this.readings});
 
@@ -116,13 +130,34 @@ class SentinelPacket {
           QualityTag.tsStale,
       ];
 
+      int? u(int off) {
+        final v = view.getUint16(off, Endian.little);
+        return v == unknownU ? null : v;
+      }
+
+      double? s(int off, double scale) {
+        final v = view.getInt16(off, Endian.little);
+        return v == unknownS ? null : v / scale;
+      }
+
+      // µg/m³ 정수로 내린다: DB·서버·화면이 전부 정수 µg/m³ 이고,
+      // 0.1 자리는 센서 정밀도(±5 µg/m³)보다 훨씬 작아서 실어봐야 의미가 없다.
+      final pm25 = u(o + 14);
+      final pm10 = u(o + 16);
+
       readings.add(
         Reading(
           deviceId: deviceId,
           seq: view.getUint32(o, Endian.little),
           ts: ts,
-          pm25: view.getUint16(o + 8, Endian.little),
-          pm10: view.getUint16(o + 10, Endian.little),
+          pm25: pm25 == null ? null : (pm25 / 10).round(),
+          pm10: pm10 == null ? null : (pm10 / 10).round(),
+          headcount: view.getUint8(o + 8),
+          occS: view.getUint8(o + 9),
+          dwellS: view.getUint16(o + 10, Endian.little),
+          tempC: s(o + 18, 100),
+          rh: s(o + 20, 100),
+          voc: s(o + 22, 10),
           flags: flags,
           quality: quality,
           battery: view.getUint8(o + 13),
@@ -151,10 +186,21 @@ class SentinelPacket {
       final o = headerSize + i * recordSize;
       view.setUint32(o, r.seq, Endian.little);
       view.setUint32(o + 4, r.ts.millisecondsSinceEpoch ~/ 1000, Endian.little);
-      view.setUint16(o + 8, r.pm25, Endian.little);
-      view.setUint16(o + 10, r.pm10, Endian.little);
+      view.setUint8(o + 8, r.headcount ?? 0);
+      view.setUint8(o + 9, r.occS ?? 0);
+      view.setUint16(o + 10, r.dwellS ?? 0, Endian.little);
       view.setUint8(o + 12, r.flags);
       view.setUint8(o + 13, r.battery ?? 100);
+      view.setUint16(o + 14, r.pm25 == null ? unknownU : r.pm25! * 10,
+          Endian.little);
+      view.setUint16(o + 16, r.pm10 == null ? unknownU : r.pm10! * 10,
+          Endian.little);
+      view.setInt16(o + 18,
+          r.tempC == null ? unknownS : (r.tempC! * 100).round(), Endian.little);
+      view.setInt16(o + 20,
+          r.rh == null ? unknownS : (r.rh! * 100).round(), Endian.little);
+      view.setInt16(o + 22,
+          r.voc == null ? unknownS : (r.voc! * 10).round(), Endian.little);
     }
 
     view.setUint16(

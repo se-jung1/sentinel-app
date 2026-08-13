@@ -86,8 +86,12 @@ class DashboardData {
   AirGrade? get currentGrade {
     final now = latest;
     if (now == null) return null;
-    final a = AirKorea.gradePm25(now.pm25);
-    final b = AirKorea.gradePm10(now.pm10);
+    // 측정 안 된 쪽은 판정에서 빠진다. 둘 다 없으면 등급도 없다 —
+    // 없는 값을 0 으로 읽어 '좋음' 이라고 하는 게 최악이다.
+    final pm25 = now.pm25, pm10 = now.pm10;
+    final a = pm25 == null ? null : AirKorea.gradePm25(pm25);
+    final b = pm10 == null ? null : AirKorea.gradePm10(pm10);
+    if (a == null || b == null) return a ?? b;
     return a.index >= b.index ? a : b;
   }
 }
